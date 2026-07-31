@@ -97,6 +97,30 @@ python3 scripts/show_page_versions.py app.db-wal --page 7
 | `--encoding {ascii,utf16le,all}` | cómo interpretar el texto dentro de la página (default: `ascii`) |
 | `--min-len N` | largo mínimo de un string para mostrarlo (default: 4) |
 | `--no-diff` | solo lista los strings de cada versión, sin el diff |
+| `--find-coords` | además del texto, busca posibles pares lat/lon codificados como doubles de 8 bytes (formato `REAL` de SQLite, big-endian IEEE-754) — útil en bases de ubicación donde las coordenadas no aparecen como texto |
+
+Ejemplo típico con `--find-coords` (una base de ubicación de WhatsApp,
+`location.db`):
+
+```bash
+python3 scripts/show_page_versions.py location.db-wal --page 8 --find-coords
+```
+
+```
+Versión 2/3 — frame 19 (offset 0x121d0) [COMMIT]
+  5492235868724@s.whatsapp.net
+
+  Posibles coordenadas (candidatas — verificar antes de dar por buenas):
+    [coord] offset 0xff0: -38.005500, -57.542600
+```
+
+Los candidatos de coordenadas se filtran para descartar floats
+subnormales/casi-cero (ruido típico de interpretar como `double`
+bytes que en realidad son espacio libre de la página) y solo se
+muestran pares donde al menos uno de los dos valores cae en rango de
+latitud válida (-90 a 90). Aun así son candidatos: conviene
+verificarlos (por ejemplo contra un mapa) antes de darlos por
+confirmados.
 
 ## Cómo funciona (resumen técnico)
 

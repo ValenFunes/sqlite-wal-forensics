@@ -98,6 +98,13 @@ funciona igual.
      UTF-16LE en vez de ASCII/UTF-8 (default: ascii)
    - `--min-len N` — largo mínimo de string a mostrar (default: 4)
    - `--no-diff` — solo listar los strings de cada versión, sin diff
+   - `--find-coords` — además del texto, busca posibles pares lat/lon
+     codificados como doubles de 8 bytes (formato REAL de SQLite,
+     big-endian IEEE-754). Útil en bases de ubicación (ej.
+     `location.db` de WhatsApp) donde el texto solo, sin esto, no
+     alcanza para ver las coordenadas asociadas a un contacto/JID.
+     Son candidatos — conviene verificarlos (por ejemplo contra un
+     mapa) antes de darlos por buenos.
 
 ## Cosas a explicarle siempre al usuario en el reporte
 

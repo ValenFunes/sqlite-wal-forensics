@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 show_page_versions.py — Muestra el contenido legible (strings) de cada
-versión histórica de una página dentro de un WAL, y el diff entre
-versiones consecutivas.
+versión histórica de una página dentro de un WAL, el diff entre
+versiones consecutivas, y opcionalmente posibles pares de coordenadas
+(lat/lon) codificados como floats de 8 bytes (REAL de SQLite).
 
 Reutiliza el parser de parse_wal.py (mismo directorio) para no duplicar
 la lógica de validación de frames/checksums.
@@ -11,16 +12,20 @@ Uso:
     python3 show_page_versions.py <archivo>-wal --page N [opciones]
 
 Opciones:
-    --min-len N      Longitud mínima de un string para mostrarlo (default: 4)
-    --encoding MODE  ascii (default), utf16le, o ambas ("all")
-    --no-diff        Solo listar los strings de cada versión, sin diff
-    --context N      Líneas de contexto alrededor de cada cambio en el diff (default: 0, o sea todo el diff completo)
+    --min-len N       Longitud mínima de un string para mostrarlo (default: 4)
+    --encoding MODE   ascii (default), utf16le, o ambas ("all")
+    --no-diff         Solo listar los strings de cada versión, sin diff
+    --find-coords     Además de los strings, buscar posibles pares
+                       lat/lon codificados como doubles de 8 bytes
+                       (formato REAL de SQLite, big-endian IEEE-754)
 """
 
 import argparse
 import difflib
+import math
 import os
 import re
+import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,6 +65,50 @@ def strings_for_page_data(data: bytes, min_len: int, encoding: str):
     return result
 
 
+def find_coordinate_pairs(data: bytes, lat_range=(-90.0, 90.0), lon_range=(-180.0, 180.0)):
+    """Escaneo byte a byte (no alineado, porque el contenido de un
+    registro SQLite no está alineado a 8 bytes dentro de la página)
+    buscando valores REAL (double de 8 bytes, big-endian IEEE-754,
+    tal cual el formato de registro de SQLite) que caigan en rango de
+    coordenadas, y que además estén seguidos 8 bytes después por otro
+    valor también válido — es decir, un candidato a par (lat, lon)
+    consecutivo tal como quedarían dos columnas seguidas en un mismo
+    registro.
+
+    Devuelve una lista de tuplas (offset, val1, val2) ordenada por
+    offset. Son CANDIDATOS: hay que verificarlos a ojo (por ejemplo
+    contra un mapa), esto no reemplaza confirmar el dato.
+    """
+    n = len(data)
+
+    def is_plausible(v, lo, hi):
+        # descarta NaN/Inf, exactamente 0, y también los "casi cero"
+        # (floats subnormales que aparecen al interpretar como double
+        # bytes que en realidad son espacio libre de la página / ceros
+        # de relleno — no son coordenadas reales, son ruido)
+        return math.isfinite(v) and abs(v) > 1e-4 and lo <= v <= hi
+
+    doubles = {}
+    for off in range(0, n - 7):
+        val = struct.unpack_from(">d", data, off)[0]
+        if is_plausible(val, *lon_range):  # lon_range es el rango más amplio, cubre ambos
+            doubles[off] = val
+
+    pairs = []
+    seen_starts = set()
+    for off, val in sorted(doubles.items()):
+        off2 = off + 8
+        if off2 in doubles and off not in seen_starts:
+            val2 = doubles[off2]
+            lat_first = is_plausible(val, *lat_range)
+            lat_second = is_plausible(val2, *lat_range)
+            if lat_first or lat_second:
+                pairs.append((off, val, val2))
+                seen_starts.add(off)
+                seen_starts.add(off2)
+    return pairs
+
+
 def main():
     ap = argparse.ArgumentParser(description="Mostrar y comparar versiones de una página a través del WAL")
     ap.add_argument("wal_path", help="ruta al archivo *-wal")
@@ -68,6 +117,8 @@ def main():
     ap.add_argument("--encoding", choices=["ascii", "utf16le", "all"], default="ascii",
                      help="cómo interpretar el texto dentro de la página (default: ascii)")
     ap.add_argument("--no-diff", action="store_true", help="no mostrar el diff entre versiones consecutivas")
+    ap.add_argument("--find-coords", action="store_true",
+                     help="además del texto, buscar posibles pares lat/lon (doubles de 8 bytes)")
     args = ap.parse_args()
 
     if not os.path.exists(args.wal_path):
@@ -93,7 +144,7 @@ def main():
     print(f"Página {args.page}: {len(versions)} versión(es) encontrada(s) en el WAL "
           f"(orden cronológico, la última es la vigente)\n")
 
-    all_strings = []
+    all_entries = []  # strings + (si --find-coords) descripciones de pares de coordenadas, para el diff
     for i, f in enumerate(versions, start=1):
         commit_tag = " [COMMIT]" if f["is_commit"] else ""
         print("=" * 72)
@@ -101,12 +152,26 @@ def main():
               f"(offset 0x{f['offset']:x}){commit_tag}")
         print("=" * 72)
         strs = strings_for_page_data(f["page_data"], args.min_len, args.encoding)
-        all_strings.append(strs)
+        entries = list(strs)
+
         if strs:
             for s in strs:
                 print(f"  {s}")
         else:
             print("  (sin texto legible con estos parámetros — probar --encoding all o bajar --min-len)")
+
+        if args.find_coords:
+            pairs = find_coordinate_pairs(f["page_data"])
+            if pairs:
+                print("\n  Posibles coordenadas (candidatas — verificar antes de dar por buenas):")
+                for off, v1, v2 in pairs:
+                    desc = f"[coord] offset 0x{off:x}: {v1:.6f}, {v2:.6f}"
+                    print(f"    {desc}")
+                    entries.append(desc)
+            elif strs:
+                print("\n  (sin candidatos a coordenadas en esta versión)")
+
+        all_entries.append(entries)
         print()
 
     if not args.no_diff and len(versions) > 1:
@@ -115,9 +180,9 @@ def main():
         print("=" * 72)
         for i in range(1, len(versions)):
             prev_f, cur_f = versions[i - 1], versions[i]
-            prev_strs, cur_strs = all_strings[i - 1], all_strings[i]
+            prev_entries, cur_entries = all_entries[i - 1], all_entries[i]
             diff = list(difflib.unified_diff(
-                prev_strs, cur_strs,
+                prev_entries, cur_entries,
                 fromfile=f"frame {prev_f['frame_index']}",
                 tofile=f"frame {cur_f['frame_index']}",
                 lineterm="",
