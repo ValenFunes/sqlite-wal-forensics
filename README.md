@@ -83,6 +83,21 @@ python3 scripts/parse_wal.py app.db-wal --page 7 --dump-dir ./recuperado
 strings recuperado/frame_00003_page_7.bin
 ```
 
+Ver directamente el texto legible de **cada versión** de la página 7 y
+un **diff** entre versiones consecutivas (para ver exactamente qué se
+agregó/cambió/borró en cada transacción, sin tener que comparar los
+`.bin` a mano):
+
+```bash
+python3 scripts/show_page_versions.py app.db-wal --page 7
+```
+
+| Flag | Qué hace |
+| --- | --- |
+| `--encoding {ascii,utf16le,all}` | cómo interpretar el texto dentro de la página (default: `ascii`) |
+| `--min-len N` | largo mínimo de un string para mostrarlo (default: 4) |
+| `--no-diff` | solo lista los strings de cada versión, sin el diff |
+
 ## Cómo funciona (resumen técnico)
 
 - El header del WAL son 32 bytes: magic number, versión de formato,
@@ -124,7 +139,8 @@ El detalle completo de offsets y el pseudocódigo del checksum está en
 sqlite-wal-forensics/
 ├── SKILL.md                  # skill de Claude (se puede instalar como .skill)
 ├── scripts/
-│   └── parse_wal.py          # parser principal
+│   ├── parse_wal.py          # parser principal
+│   └── show_page_versions.py # muestra texto + diff entre versiones de una página
 └── references/
     └── wal_format.md         # referencia detallada del formato (offsets, checksum)
 ```

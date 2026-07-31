@@ -81,6 +81,24 @@ funciona igual.
    python3 scripts/parse_wal.py <archivo>-wal --json salida.json
    ```
 
+6. **Para ver el contenido legible de cada versión de una página, y el
+   diff entre versiones consecutivas** (esto es lo más directo para
+   responder "¿qué decía esto antes de que lo cambiaran/borraran?"):
+
+   ```bash
+   python3 scripts/show_page_versions.py <archivo>-wal --page 7
+   ```
+
+   Extrae los strings imprimibles de cada versión histórica de esa
+   página (igual que haría `strings`, pero por versión) y muestra un
+   diff (formato unificado, como `git diff`) entre cada versión y la
+   siguiente, para que salte a la vista qué texto se agregó y qué
+   texto desapareció en cada transacción. Opciones:
+   - `--encoding {ascii,utf16le,all}` — por si el texto está en
+     UTF-16LE en vez de ASCII/UTF-8 (default: ascii)
+   - `--min-len N` — largo mínimo de string a mostrar (default: 4)
+   - `--no-diff` — solo listar los strings de cada versión, sin diff
+
 ## Cosas a explicarle siempre al usuario en el reporte
 
 - **mxFrame** = cantidad de frames válidos encontrados. Frames más allá
